@@ -37,7 +37,6 @@ def export():
 
     suffix = ' [both]' if attach_reference else ' [proposed]'
 
-    print(export_data)
     write_file(export_data, suffix)
 
 
