@@ -52,24 +52,11 @@ def get_user_inputs(model_type):
     results = {}
 
     if model_type == 'Proposed':
-        results['orientation'] = simpledialog.askinteger("Orientation", '{:^100}'.format("Enter the model orientation"),
-                                                         parent=root, minvalue=0, maxvalue=360)
+        results['orientation'] = simpledialog.askinteger("Orientation", 
+            '{:^100}'.format("Enter the model orientation"), parent=root, minvalue=0, maxvalue=360)
 
-    room_nodes = simpledialog.askstring("Room Nodes",
-                                        '{:^100}'.format("(" + model_type + " Model) Enter Room Supply Air Nodes"),
-                                        parent=root)
-    if room_nodes:
-        results['room_nodes'] = [int(node) for node in room_nodes.split(',')]
-    else:
-        results['room_nodes'] = []
-
-    oa_intake_nodes = simpledialog.askstring("Outside Air Intake Nodes",
-                                             '{:^100}'.format("(" + model_type + " Model) Enter Outside Air Intake Nodes"),
-                                             parent=root)
-    if oa_intake_nodes:
-        results['oa_intake_nodes'] = [int(node) for node in oa_intake_nodes.split(',')]
-    else:
-        results['oa_intake_nodes'] = []
+    results['oa_intake_nodes'] = get_node_list(root,"Outside Air Intake Nodes", model_type, "Enter Outside Air Intake Nodes")
+    results['room_nodes'] = get_node_list(root,"Room Supply Air Nodes", model_type, "Enter Room Supply Air Nodes")
 
     results['file_name'] = IesFilePicker.pick_aps_file()
 
@@ -112,9 +99,13 @@ def get_energy(aps_file):
             if energy_usage:
                 energy_usage = energy_usage * (24 / aps_file.results_per_day) / 1000
                 demand = np.max(result)
-                energy_sources_export[str(source_k)] = {'name': source_v['name'], 'cef': source_v['cef'],
-                                                        'usage': energy_usage, 'demand': demand / 1000,
-                                                        'all': [round(float(r), 2) for r in result]}
+                energy_sources_export[str(source_k)] = {
+                    'name': source_v['name'], 
+                    'cef': source_v['cef'],
+                    'usage': energy_usage, 
+                    'demand': demand / 1000,
+                    'all': [round(float(r), 2) for r in result],
+                    }
         energy_uses_export[str(use_k)] = {'name': use_v['name'], 'sources': energy_sources_export}
     print('DONE')
     return energy_uses_export
@@ -133,7 +124,7 @@ def get_aps_stats(aps_file):
             'area': sizes[0],
             'volume': sizes[1],
             'rooms': sizes[2]
-        },
+            },
         'VE_version' : iesve.VEProject.get_current_project().get_version(),
     }
 
@@ -273,19 +264,16 @@ def get_room_results(aps_file):
     for room_i, room in enumerate(room_list):
         pb_update(room_i, len(room_list))
 
-        internal_gain = aps_file.get_room_results(room[1], 'Casual gains', 'Internal gain',
-                                                  'z') + aps_file.get_room_results(room[1], 'Internal latent gain',
-                                                                                   'Internal latent gain', 'z')
+        internal_gain = aps_file.get_room_results(room[1], 'Casual gains', 'Internal gain', 
+            'z') + aps_file.get_room_results(room[1], 'Internal latent gain', 'Internal latent gain', 'z')
         solar_gain = aps_file.get_room_results(room[1], 'Window solar gains', 'Solar gain', 'z')
         infiltration_gain = aps_file.get_room_results(room[1], 'Infiltration gain', 'Infiltration gain', 'z')
         infiltration_gain_lat = aps_file.get_room_results(room[1], 'Infiltration lat gain', 'Infiltration lat gain', 'z')
-        if infiltration_gain_lat:
+        if infiltration_gain_lat is not None:
             infiltration_gain += infiltration_gain_lat
-        external_conduction_gain = aps_file.get_room_results(room[1], 'Conduction from ext elements',
-                                                             'External conduction gain', 'z')
-        internal_conduction_gain = aps_file.get_room_results(room[1], 'Conduction from int surfaces',
-                                                             'Internal conduction gain', 'z')
-
+        external_conduction_gain = aps_file.get_room_results(room[1], 'Conduction from ext elements', 'External conduction gain', 'z')
+        internal_conduction_gain = aps_file.get_room_results(room[1], 'Conduction from int surfaces', 'Internal conduction gain', 'z')
+                                                             
         total_gain = internal_gain + solar_gain + infiltration_gain + external_conduction_gain + internal_conduction_gain
 
         for i, v in enumerate(total_gain):
@@ -354,17 +342,17 @@ def get_gains(model_type):
     ve_project = iesve.VEProject.get_current_project()
     if model_type == 'Proposed':
         model = ve_project.models[0]
-        get_room_data_type = 0
+        room_data_type = 0 #Default Data
     else:
         model = ve_project.models[1]
-        get_room_data_type = 2
+        room_data_type = 2 #PRM Data
 
-    bodies = model.get_bodies(False)  # [:]
+    bodies = [body for body in model.get_bodies(False) if body.type == iesve.VEBody_type.room]
 
     room_gains = {'Lighting': 0, 'People': 0, 'Equipment': 0}
 
     for body in bodies:
-        gains = body.get_room_data(get_room_data_type).get_internal_gains()  # this needs to be fixed
+        gains = body.get_room_data(room_data_type).get_internal_gains()
         for gain in gains:
             results = gain.get()
             if results['type_str'] in ['Machinery', 'Miscellaneous', 'Cooking', 'Computers']:
@@ -423,8 +411,8 @@ def get_airflows(aps_file, room_nodes, oa_intake_nodes):
 
 
 def ghnr(aps_file, node):
-    if aps_file.get_hvac_node_results(node, -1, 'Volume flow') is None and aps_file.get_hvac_node_results(node, 1,
-                                                                                                          'Volume flow') is None:
+    if aps_file.get_hvac_node_results(node, -1, 'Volume flow'
+        ) is None and aps_file.get_hvac_node_results(node, 1, 'Volume flow') is None:
         return None  # Node doesn't exist
     elif aps_file.get_hvac_node_results(node, -1, 'Volume flow') is not None:
         return aps_file.get_hvac_node_results(node, -1, 'Volume flow')  # Node is a plant side node
@@ -454,6 +442,23 @@ def pb_update(index, length):
         _threshold += 0.01
     if index + 1 == length:
         print("]")
+
+
+def get_node_list(root,title, model_type, prompt_text):
+    while True:   
+        nodes = simpledialog.askstring(title,
+            '{:^100}'.format("(" + model_type + " Model) "+ prompt_text), parent=root)
+        
+        if nodes:
+            try:
+                result = [int(node.strip()) for node in nodes.split(',') if node]
+                print(title+": "+str(result))
+                return result
+            except:
+                print("Node list improperly formatted, try again")
+    
+        else:
+            return []
 
 
 def reduce_dict(full_dict, key_map):
