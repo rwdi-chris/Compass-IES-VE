@@ -1,7 +1,7 @@
 """compass_export.py: Export script to be used in IES-VE VEScript environment to export data for use on EnergyCompass.design"""
 __author__ = 'Chris Frankowski'
 __email__ = 'chris.frankowski@rwdi.com'
-__version__ = '2018.0.0'
+__version__ = '2018.1.0'
 
 import iesve, json, os
 import numpy as np
@@ -10,6 +10,9 @@ from tkinter import Tk, simpledialog, messagebox, filedialog
 
 PROGRESS_BAR_WIDTH = 100
 HDD_REF = 18.3
+
+VE_VERSION_MAJOR = int(iesve.VEProject.get_current_project().get_version().split('.')[0])
+VE_VERSION_MINOR = int(iesve.VEProject.get_current_project().get_version().split('.')[1])
 
 
 def export():
@@ -58,6 +61,10 @@ def get_user_inputs(model_type):
     results['oa_intake_nodes'] = get_node_list(root,"Outside Air Intake Nodes", model_type, "Enter Outside Air Intake Nodes")
     results['room_nodes'] = get_node_list(root,"Room Supply Air Nodes", model_type, "Enter Room Supply Air Nodes")
 
+    if VE_VERSION_MAJOR == 2017:
+        results['electricity_cost'] = cost_input(root, "Electricity Cost", model_type, "Enter Electricity Cost")
+        results['natural_gas_cost'] = cost_input(root, "Natural Gas Cost", model_type, "Enter Natural Gas Cost")
+
     results['file_name'] = IesFilePicker.pick_aps_file()
 
     root.destroy()
@@ -78,7 +85,13 @@ def get_results(user_input, model_type):
         results['building_results'] = get_building_results(aps_file)
         results['gains'] = get_gains(model_type)
         results['bodies'] = get_bodies(model_type)
-        results['costs'] = get_costs(file_name)
+        if VE_VERSION_MAJOR == 2017:
+            results['costs'] = {
+                'electricity' : user_input['electricity_cost'],
+                'natural_gas' : user_input['natural_gas_cost'],
+                }
+        else:
+            results['costs'] = get_costs(file_name)
         results['airflows'] = get_airflows(aps_file, user_input['room_nodes'], user_input['oa_intake_nodes'])
         results['room_results'] = get_room_results(aps_file)
         results['diagnostic'] = {'room_nodes': user_input['room_nodes'], 'oa_intake_nodes': user_input['oa_intake_nodes']}
@@ -134,7 +147,10 @@ def get_aps_stats(aps_file):
 
 def get_weather(aps_file):
     print('Gathering Weather Data...', end='')
-    temps = aps_file.get_weather_results('Temperature', 'Dry-bulb temperature')
+    if VE_VERSION_MAJOR == 2017:
+        temps = aps_file.get_weather_results('Temperature')
+    else:
+        temps = aps_file.get_weather_results('Temperature', 'Dry-bulb temperature')
 
     hdd = sum([max(HDD_REF - temp, 0) for temp in temps]) / aps_file.results_per_day
     cdd = sum([max(temp - HDD_REF, 0) for temp in temps]) / aps_file.results_per_day
@@ -264,15 +280,26 @@ def get_room_results(aps_file):
     for room_i, room in enumerate(room_list):
         pb_update(room_i, len(room_list))
 
-        internal_gain = aps_file.get_room_results(room[1], 'Casual gains', 'Internal gain', 
-            'z') + aps_file.get_room_results(room[1], 'Internal latent gain', 'Internal latent gain', 'z')
-        solar_gain = aps_file.get_room_results(room[1], 'Window solar gains', 'Solar gain', 'z')
-        infiltration_gain = aps_file.get_room_results(room[1], 'Infiltration gain', 'Infiltration gain', 'z')
-        infiltration_gain_lat = aps_file.get_room_results(room[1], 'Infiltration lat gain', 'Infiltration lat gain', 'z')
-        if infiltration_gain_lat is not None:
-            infiltration_gain += infiltration_gain_lat
-        external_conduction_gain = aps_file.get_room_results(room[1], 'Conduction from ext elements', 'External conduction gain', 'z')
-        internal_conduction_gain = aps_file.get_room_results(room[1], 'Conduction from int surfaces', 'Internal conduction gain', 'z')
+        if VE_VERSION_MAJOR == 2017:
+            internal_gain = aps_file.get_room_results(room[1], 'Internal gain', 
+                'z') + aps_file.get_room_results(room[1], 'Internal latent gain', 'z')
+            solar_gain = aps_file.get_room_results(room[1], 'Solar gain', 'z')
+            infiltration_gain = aps_file.get_room_results(room[1], 'Infiltration gain', 'z')
+            infiltration_gain_lat = aps_file.get_room_results(room[1], 'Infiltration lat gain', 'z')
+            if infiltration_gain_lat is not None:
+                infiltration_gain += infiltration_gain_lat
+            external_conduction_gain = aps_file.get_room_results(room[1], 'External conduction gain', 'z')
+            internal_conduction_gain = aps_file.get_room_results(room[1], 'Internal conduction gain', 'z')
+        else:
+            internal_gain = aps_file.get_room_results(room[1], 'Casual gains', 'Internal gain', 
+                'z') + aps_file.get_room_results(room[1], 'Internal latent gain', 'Internal latent gain', 'z')
+            solar_gain = aps_file.get_room_results(room[1], 'Window solar gains', 'Solar gain', 'z')
+            infiltration_gain = aps_file.get_room_results(room[1], 'Infiltration gain', 'Infiltration gain', 'z')
+            infiltration_gain_lat = aps_file.get_room_results(room[1], 'Infiltration lat gain', 'Infiltration lat gain', 'z')
+            if infiltration_gain_lat is not None:
+                infiltration_gain += infiltration_gain_lat
+            external_conduction_gain = aps_file.get_room_results(room[1], 'Conduction from ext elements', 'External conduction gain', 'z')
+            internal_conduction_gain = aps_file.get_room_results(room[1], 'Conduction from int surfaces', 'Internal conduction gain', 'z')
                                                              
         total_gain = internal_gain + solar_gain + infiltration_gain + external_conduction_gain + internal_conduction_gain
 
@@ -294,9 +321,12 @@ def get_building_results(aps_file):
     for i, var in enumerate(variables):
         pb_update(i, len(variables))
         if var['units_type'] in ['Power', 'Sys Load']:
-
-            total = np.sum(aps_file.get_results(var['aps_varname'], var['display_name'], var['model_level']))
-            peak = np.max(aps_file.get_results(var['aps_varname'], var['display_name'], var['model_level']))
+            if VE_VERSION_MAJOR == 2017:
+                total = np.sum(aps_file.get_results(var['aps_varname'], var['model_level']))
+                peak = np.max(aps_file.get_results(var['aps_varname'], var['model_level']))
+            else:
+                total = np.sum(aps_file.get_results(var['aps_varname'], var['display_name'], var['model_level']))
+                peak = np.max(aps_file.get_results(var['aps_varname'], var['display_name'], var['model_level']))
 
             if total:
                 results[var['aps_varname']] = {'total': float(total), 'peak': float(peak)}
@@ -459,6 +489,12 @@ def get_node_list(root,title, model_type, prompt_text):
     
         else:
             return []
+
+def cost_input(root,title, model_type, prompt_text):
+    result = simpledialog.askfloat(title,
+        '{:^100}'.format("("+model_type+" Model) "+ prompt_text), parent=root, minvalue=0, maxvalue=1000000)
+
+    return result
 
 
 def reduce_dict(full_dict, key_map):
