@@ -1,10 +1,12 @@
 """compass_export.py: Export script to be used in IES-VE VEScript environment to export data for use on EnergyCompass.design"""
 __author__ = 'Chris Frankowski'
 __email__ = 'chris.frankowski@rwdi.com'
-__version__ = '2018.1.0'
+__version__ = '2023.0.0'
 
 import iesve, json, os
 import numpy as np
+from datetime import datetime, timezone
+from pathlib import Path
 from ies_file_picker import IesFilePicker
 from tkinter import Tk, simpledialog, messagebox, filedialog
 
@@ -55,8 +57,11 @@ def get_user_inputs(model_type):
     results = {}
 
     if model_type == 'Proposed':
-        results['orientation'] = simpledialog.askinteger("Orientation", 
-            '{:^100}'.format("Enter the model orientation"), parent=root, minvalue=0, maxvalue=360)
+        try:
+            results['orientation'] = iesve.VEGeometry.get_building_orientation()
+        except AttributeError:
+            results['orientation'] = simpledialog.askinteger("Orientation", 
+                '{:^100}'.format("Enter the model orientation"), parent=root, minvalue=0, maxvalue=360)
 
     results['oa_intake_nodes'] = get_node_list(root,"Outside Air Intake Nodes", model_type, "Enter Outside Air Intake Nodes")
     results['room_nodes'] = get_node_list(root,"Room Supply Air Nodes", model_type, "Enter Room Supply Air Nodes")
@@ -95,6 +100,11 @@ def get_results(user_input, model_type):
         results['airflows'] = get_airflows(aps_file, user_input['room_nodes'], user_input['oa_intake_nodes'])
         results['room_results'] = get_room_results(aps_file)
         results['diagnostic'] = {'room_nodes': user_input['room_nodes'], 'oa_intake_nodes': user_input['oa_intake_nodes']}
+
+    p = Path(file_name)
+    results['aps_stats']['current_time'] = datetime.now(timezone.utc).isoformat()
+    results['aps_stats']['ctime'] = datetime.fromtimestamp(p.stat().st_ctime, timezone.utc).isoformat()
+    results['aps_stats']['mtime'] = datetime.fromtimestamp(p.stat().st_mtime, timezone.utc).isoformat()
 
     return results
 
@@ -258,14 +268,18 @@ def get_bodies(model_type):
     for c in constructions_set:
         construction = constructions_db.get_construction(c, iesve.construction_class.none)
         u_value = construction.get_u_factor(iesve.uvalue_types.ashrae)
+        g_values = construction.get_g_values()
 
         constructions_output[construction.id] = {
             'category': str(construction.category),
             'u_value': round(u_value, 6),
+            'g_values': g_values,
             'reference' : construction.reference,
         }
 
-    return {'constructions': constructions_output, 'bodies': bodies_output}
+    wwr = iesve.VEGeometry.get_wwr()
+
+    return {'constructions': constructions_output, 'bodies': bodies_output, 'wwr': wwr}
 
 
 def get_room_results(aps_file):
